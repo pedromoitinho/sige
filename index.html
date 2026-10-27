@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIGE — Protótipo</title>
+<link rel="icon" href="icone.png">
+<style>
+  /* paleta da apresentação: roxo profundo + laranja/âmbar neon */
+  :root { --bg:#1a0726; --card:#2a0d3dcc; --line:#4a1c5e; --txt:#f5ecff; --mut:#b89acb; --acc:#ff6a1a; --acc2:#ffb020; --mag:#c026d3; --ok:#ffb020; --warn:#ff8a3d; --bad:#ff3d6e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; color:var(--txt); min-height:100vh;
+    background:linear-gradient(#1a0726cc, #1a0726ee), url(fundo.png) center/cover fixed, var(--bg); }
+  header { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; background:#1a0726e6; }
+  header b { font-size:22px; font-weight:800; letter-spacing:1px; background:linear-gradient(90deg,var(--acc2),var(--acc),var(--mag)); -webkit-background-clip:text; color:transparent; }
+  header img { height:36px; border-radius:6px; }
+  h2,h3 { color:var(--acc2); }
+  nav button { background:none; border:0; color:var(--mut); padding:6px 10px; cursor:pointer; font:inherit; }
+  nav button.on { color:var(--txt); border-bottom:2px solid var(--acc); }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+  .kpi small { color:var(--mut); display:block; } .kpi strong { font-size:24px; }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:500; font-size:13px; }
+  .scroll { overflow-x:auto; }
+  input,select { background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; width:100%; }
+  td input { width:70px; }
+  .btn { background:linear-gradient(90deg,var(--acc),var(--mag)); color:#fff; border:0; border-radius:6px; padding:8px 14px; cursor:pointer; font:inherit; }
+  .btn.ghost { background:none; border:1px solid var(--line); color:var(--txt); }
+  .tag { padding:2px 8px; border-radius:99px; font-size:12px; background:var(--line); white-space:nowrap; }
+  .tag.Divergência { background:var(--bad); } .tag.Fechado { background:var(--ok); color:#000; } .tag.Em.Andamento { background:var(--warn); color:#000; }
+  .flow { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; } .flow span { padding:4px 10px; border-radius:6px; border:1px solid var(--line); color:var(--mut); font-size:13px; }
+  .flow span.cur { border-color:var(--acc); color:var(--txt); background:#ff6a1a33; }
+  .card { backdrop-filter:blur(6px); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; } .row > * { flex:1 1 150px; }
+  .bad { color:var(--bad); } .ok { color:var(--ok); } .mut { color:var(--mut); }
+  #login { max-width:360px; margin:12vh auto; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ponytail: estado só em memória, recarregar a página reseta. Trocar por API Spring Boot depois.
+const ESTADOS = ['Planejado','Configurado','Em Montagem','Em Andamento','Em Conferência','Fechado'];
+const brl = v => v.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+
+const db = {
+  user: null, tela: 'painel', eventoId: null,
+  catalogo: [
+    { id:1, nome:'Caixa de som 1000W', tipo:'Patrimonial', preco:250, multa:1800 },
+    { id:2, nome:'Painel LED 3x2m', tipo:'Patrimonial', preco:900, multa:12000 },
+    { id:3, nome:'Mesa redonda', tipo:'Patrimonial', preco:25, multa:300 },
+    { id:4, nome:'Refrigerante 2L', tipo:'Insumo', preco:12, multa:0 },
+    { id:5, nome:'Salgados (cento)', tipo:'Insumo', preco:80, multa:0 },
+  ],
+  staff: [
+    { funcao:'Garçom', diaria:180 }, { funcao:'Barman', diaria:250 },
+    { funcao:'Segurança', diaria:220 }, { funcao:'Recepcionista', diaria:160 },
+  ],
+  eventos: [
+    { id:1, nome:'Casamento Silva', data:'2026-11-14', local:'Espaço Jardim', resp:'Ana', status:'Em Andamento', receita:25000,
+      itens:[ {id:1,env:8,dev:0,cons:0,av:0}, {id:2,env:2,dev:0,cons:0,av:0}, {id:5,env:20,dev:0,cons:0,av:0} ],
+      equipe:[ {funcao:'Garçom',qtd:6,dias:1}, {funcao:'Barman',qtd:2,dias:1} ] },
+    { id:2, nome:'Formatura Med 2026', data:'2026-12-05', local:'Clube Central', resp:'Bruno', status:'Planejado', receita:40000, itens:[], equipe:[] },
+  ],
+};
+const item = id => db.catalogo.find(c => c.id === id);
+const ev = () => db.eventos.find(e => e.id === db.eventoId);
+
+// RN03/RN04: perdas, sobras e lucratividade
+function fechamento(e) {
+  let custoItens = 0, multas = 0, perdas = [];
+  for (const l of e.itens) {
+    const c = item(l.id);
+    if (c.tipo === 'Patrimonial') {
+      custoItens += l.env * c.preco;
+      const falta = l.env - l.dev + l.av; // faltantes + avariados devolvidos
+      if (falta > 0) { multas += falta * c.multa; perdas.push(`${falta}x ${c.nome}`); }
+    } else custoItens += l.cons * c.preco;
+  }
+  const custoStaff = e.equipe.reduce((s, q) => s + q.qtd * q.dias * db.staff.find(x => x.funcao === q.funcao).diaria, 0);
+  const custo = custoItens + custoStaff;
+  return { custoItens, custoStaff, multas, perdas, custo, lucro: e.receita + multas - custo };
+}
+
+function render() {
+  const app = document.getElementById('app');
+  if (!db.user) return app.innerHTML = `
+    <div class="card" id="login"><img src="logo.png" alt="SIGE — Sistema Integrado de Gestão de Eventos"
+      style="display:block;width:100%;max-width:300px;margin:0 auto 16px;border-radius:12px">
+      <label>E-mail<input id="em" value="admin@sige.com"></label><br><br>
+      <label>Senha<input type="password" value="123456"></label><br><br>
+      <label>Perfil<select id="pf"><option>Administrador</option><option>Fornecedor</option><option>Cliente</option></select></label><br><br>
+      <button class="btn" onclick="db.user=pf.value;render()">Entrar</button></div>`;
+  const abas = { painel:'Painel', eventos:'Eventos', catalogo:'Catálogo' };
+  app.innerHTML = `<header><img src="icone.png" alt=""><b>SIGE</b><nav>${Object.entries(abas).map(([k,v]) =>
+      `<button class="${db.tela===k||(k==='eventos'&&db.tela==='evento')?'on':''}" onclick="go('${k}')">${v}</button>`).join('')}</nav>
+    <span class="mut" style="margin-left:auto">${db.user} · <a href="#" style="color:var(--acc)" onclick="db.user=null;render()">sair</a></span></header>
+    <main>${telas[db.tela]()}</main>`;
+}
+function go(t, id) { db.tela = t; db.eventoId = id ?? db.eventoId; render(); }
+
+const telas = {
+  painel() {
+    const ativos = db.eventos.filter(e => e.status !== 'Fechado');
+    const lucro = db.eventos.reduce((s, e) => s + fechamento(e).lucro, 0);
+    return `<div class="grid">
+      <div class="card kpi"><small>Eventos ativos</small><strong>${ativos.length}</strong></div>
+      <div class="card kpi"><small>Em divergência</small><strong class="bad">${db.eventos.filter(e=>e.status==='Divergência').length}</strong></div>
+      <div class="card kpi"><small>Itens no catálogo</small><strong>${db.catalogo.length}</strong></div>
+      <div class="card kpi"><small>Lucro projetado</small><strong class="ok">${brl(lucro)}</strong></div></div>
+      ${telas.eventos()}`;
+  },
+  eventos() {
+    return `<div class="card"><h3>Eventos</h3><div class="scroll"><table>
+      <tr><th>Nome</th><th>Data</th><th>Local</th><th>Responsável</th><th>Status</th></tr>
+      ${db.eventos.map(e => `<tr style="cursor:pointer" onclick="go('evento',${e.id})"><td>${e.nome}</td><td>${e.data.split('-').reverse().join('/')}</td>
+        <td>${e.local}</td><td>${e.resp}</td><td><span class="tag ${e.status}">${e.status}</span></td></tr>`).join('')}
+      </table></div></div>
+      <div class="card"><h3>Novo evento</h3><form class="row" onsubmit="novoEvento(event)">
+        <label>Nome<input name="nome" required></label><label>Data<input name="data" type="date" required></label>
+        <label>Local<input name="local" required></label><label>Responsável<input name="resp" required></label>
+        <label>Receita (R$)<input name="receita" type="number" min="0" required></label>
+        <div><button class="btn">Criar</button></div></form></div>`;
+  },
+  evento() {
+    const e = ev(), f = fechamento(e), i = ESTADOS.indexOf(e.status);
+    const edit = !['Fechado'].includes(e.status);
+    return `<button class="btn ghost" onclick="go('eventos')">← Voltar</button>
+      <div class="card"><h2 style="margin:0">${e.nome} <span class="tag ${e.status}">${e.status}</span></h2>
+        <p class="mut">${e.data.split('-').reverse().join('/')} · ${e.local} · Resp.: ${e.resp}</p>
+        <div class="flow">${ESTADOS.map(s => `<span class="${s===e.status?'cur':''}">${s}</span>`).join('')}
+          ${e.status==='Divergência'?'<span class="cur" style="border-color:var(--bad)">Divergência</span>':''}</div>
+        ${edit ? `<button class="btn" onclick="avancar()">${e.status==='Divergência'?'Aplicar ajustes e fechar':'Avançar status →'}</button>` : ''}
+      </div>
+      <div class="card"><h3>Movimentação de itens</h3><div class="scroll"><table>
+        <tr><th>Item</th><th>Tipo</th><th>Enviado</th><th>Devolvido</th><th>Consumido</th><th>Avariado</th><th>Sobra / Falta</th></tr>
+        ${e.itens.map((l, k) => { const c = item(l.id), pat = c.tipo==='Patrimonial';
+          const saldo = pat ? l.dev - l.env : l.env - l.cons;
+          return `<tr><td>${c.nome}</td><td>${c.tipo}</td>
+          ${['env','dev','cons','av'].map(campo => `<td>${(pat&&campo==='cons')||(!pat&&['dev','av'].includes(campo)) ? '—' :
+            `<input type="number" min="0" value="${l[campo]}" ${edit?'':'disabled'} onchange="setItem(${k},'${campo}',this.value)">`}</td>`).join('')}
+          <td class="${saldo<0?'bad':''}">${pat ? (saldo<0?`falta ${-saldo}`:'ok') : `sobra ${saldo}`}</td></tr>`; }).join('')}
+      </table></div>
+      ${edit ? `<div class="row" style="margin-top:12px"><select id="ni">${db.catalogo.map(c=>`<option value="${c.id}">${c.nome}</option>`).join('')}</select>
+        <input id="nq" type="number" min="1" value="1"><button class="btn" onclick="addItem()">Registrar saída</button></div>` : ''}</div>
+      <div class="card"><h3>Equipe alocada</h3><div class="scroll"><table><tr><th>Função</th><th>Qtd</th><th>Diárias</th><th>Custo</th></tr>
+        ${e.equipe.map(q => `<tr><td>${q.funcao}</td><td>${q.qtd}</td><td>${q.dias}</td><td>${brl(q.qtd*q.dias*db.staff.find(x=>x.funcao===q.funcao).diaria)}</td></tr>`).join('')}
+      </table></div>
+      ${edit ? `<div class="row" style="margin-top:12px"><select id="sf">${db.staff.map(s=>`<option>${s.funcao}</option>`).join('')}</select>
+        <input id="sq" type="number" min="1" value="1" title="Quantidade"><input id="sd" type="number" min="1" value="1" title="Diárias">
+        <button class="btn" onclick="addStaff()">Alocar</button></div>` : ''}</div>
+      <div class="card"><h3>Relatório de fechamento</h3><table>
+        <tr><td>Receita contratada</td><td>${brl(e.receita)}</td></tr>
+        <tr><td>Custo de itens (aluguel + consumo real)</td><td>${brl(f.custoItens)}</td></tr>
+        <tr><td>Custo de staff</td><td>${brl(f.custoStaff)}</td></tr>
+        <tr><td>Penalidades por avarias/perdas ${f.perdas.length?`<small class="bad">(${f.perdas.join(', ')})</small>`:''}</td><td>${brl(f.multas)}</td></tr>
+        <tr><th>Lucro líquido</th><th class="${f.lucro<0?'bad':'ok'}">${brl(f.lucro)}</th></tr></table>
+        <br><button class="btn ghost" onclick="print()">Imprimir relatório</button></div>`;
+  },
+  catalogo() {
+    return `<div class="card"><h3>Materiais e insumos</h3><div class="scroll"><table><tr><th>Item</th><th>Tipo</th><th>Preço un.</th><th>Multa avaria</th></tr>
+      ${db.catalogo.map(c => `<tr><td>${c.nome}</td><td>${c.tipo}</td><td>${brl(c.preco)}</td><td>${c.multa?brl(c.multa):'—'}</td></tr>`).join('')}</table></div>
+      <form class="row" style="margin-top:12px" onsubmit="novoItem(event)"><label>Nome<input name="nome" required></label>
+        <label>Tipo<select name="tipo"><option>Patrimonial</option><option>Insumo</option></select></label>
+        <label>Preço<input name="preco" type="number" min="0" required></label><label>Multa<input name="multa" type="number" min="0" value="0"></label>
+        <div><button class="btn">Adicionar</button></div></form></div>
+      <div class="card"><h3>Staff (custo por diária)</h3><table>${db.staff.map(s=>`<tr><td>${s.funcao}</td><td>${brl(s.diaria)}</td></tr>`).join('')}</table></div>`;
+  },
+};
+
+function novoEvento(e) { // RN01: status inicial Planejado
+  e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
+  db.eventos.push({ ...d, receita:+d.receita, id:Date.now(), status:'Planejado', itens:[], equipe:[] }); render();
+}
+function novoItem(e) {
+  e.preventDefault(); const d = Object.fromEntries(new FormData(e.target));
+  db.catalogo.push({ ...d, preco:+d.preco, multa:+d.multa, id:Date.now() }); render();
+}
+function addItem() { // RN02: saída só com quantidade registrada
+  const q = +nq.value; if (q < 1) return alert('Informe a quantidade enviada.');
+  ev().itens.push({ id:+ni.value, env:q, dev:0, cons:0, av:0 }); render();
+}
+function addStaff() { ev().equipe.push({ funcao:sf.value, qtd:+sq.value, dias:+sd.value }); render(); }
+function setItem(k, campo, v) { ev().itens[k][campo] = Math.max(0, +v); render(); }
+function avancar() {
+  const e = ev();
+  if (e.status === 'Divergência') { e.status = 'Fechado'; return render(); }
+  if (e.status === 'Em Conferência' && fechamento(e).perdas.length) e.status = 'Divergência';
+  else e.status = ESTADOS[ESTADOS.indexOf(e.status) + 1];
+  render();
+}
+render();
+</script>
+</body>
+</html>
